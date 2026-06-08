@@ -1,9 +1,5 @@
 services:
 
-  logger.channel.aerospike_cache:
-    parent: logger.channel_base
-    arguments: ['aerospike_cache']
-
   # Manages the connection to the Aerospike Connection Manager (ACM) daemon.
   # Reads socket path and namespace from $settings (see README for keys).
   aerospike_cache.connection:
@@ -23,7 +19,7 @@ services:
       - '@aerospike_cache.connection'
       - '@aerospike_cache.tags_checksum'
       - '@datetime.time'
-      - '@logger.channel.aerospike_cache'
+      - '@logger.factory'
     tags:
       - { name: cache.bin_factory }
 
@@ -38,6 +34,6 @@ services:
       - '@cache.backend.aerospike'
       - '@cache.backend.database'
       - '@aerospike_cache.connection'
-      - '@logger.channel.aerospike_cache'
+      - '@logger.factory'
     tags:
       - { name: cache.bin_factory }

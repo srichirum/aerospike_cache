@@ -5,6 +5,7 @@ namespace Drupal\Tests\aerospike_cache\Unit;
 use Drupal\aerospike_cache\AerospikeConnection;
 use Drupal\aerospike_cache\AerospikeFailoverCacheBackend;
 use Drupal\Core\Cache\CacheBackendInterface;
+use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -36,21 +37,30 @@ class AerospikeFailoverCacheBackendTest extends TestCase {
   private AerospikeConnection $connection;
 
   /**
-   * Mock logger.
+   * Mock logger channel (returned by the factory mock).
    *
    * @var \Psr\Log\LoggerInterface|\PHPUnit\Framework\MockObject\MockObject
    */
-  private LoggerInterface $logger;
+  private LoggerInterface $loggerChannel;
+
+  /**
+   * Mock logger factory.
+   *
+   * @var \Drupal\Core\Logger\LoggerChannelFactoryInterface|\PHPUnit\Framework\MockObject\MockObject
+   */
+  private LoggerChannelFactoryInterface $loggerFactory;
 
   /**
    * {@inheritdoc}
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->aerospike  = $this->createMock(CacheBackendInterface::class);
-    $this->fallback   = $this->createMock(CacheBackendInterface::class);
-    $this->connection = $this->createMock(AerospikeConnection::class);
-    $this->logger     = $this->createMock(LoggerInterface::class);
+    $this->aerospike     = $this->createMock(CacheBackendInterface::class);
+    $this->fallback      = $this->createMock(CacheBackendInterface::class);
+    $this->connection    = $this->createMock(AerospikeConnection::class);
+    $this->loggerChannel = $this->createMock(LoggerInterface::class);
+    $this->loggerFactory = $this->createMock(LoggerChannelFactoryInterface::class);
+    $this->loggerFactory->method('get')->willReturn($this->loggerChannel);
   }
 
   /**
@@ -61,7 +71,7 @@ class AerospikeFailoverCacheBackendTest extends TestCase {
       $this->aerospike,
       $this->fallback,
       $this->connection,
-      $this->logger,
+      $this->loggerFactory,
     );
   }
 
@@ -141,7 +151,7 @@ class AerospikeFailoverCacheBackendTest extends TestCase {
   public function testWarningLoggedExactlyOnceOnFailover(): void {
     $this->connection->method('isAvailable')->willReturn(FALSE);
     $this->fallback->method('get')->willReturn(FALSE);
-    $this->logger->expects($this->once())->method('warning');
+    $this->loggerChannel->expects($this->once())->method('warning');
 
     $backend = $this->backend();
     $backend->get('a');
@@ -156,7 +166,7 @@ class AerospikeFailoverCacheBackendTest extends TestCase {
   public function testNoWarningWhenAerospikeIsAvailable(): void {
     $this->connection->method('isAvailable')->willReturn(TRUE);
     $this->aerospike->method('get')->willReturn(FALSE);
-    $this->logger->expects($this->never())->method('warning');
+    $this->loggerChannel->expects($this->never())->method('warning');
 
     $backend = $this->backend();
     $backend->get('a');

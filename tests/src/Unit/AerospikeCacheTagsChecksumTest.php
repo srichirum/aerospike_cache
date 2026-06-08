@@ -4,6 +4,7 @@ namespace Drupal\Tests\aerospike_cache\Unit;
 
 use Drupal\aerospike_cache\AerospikeCacheTagsChecksum;
 use Drupal\aerospike_cache\AerospikeConnection;
+use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -21,26 +22,35 @@ class AerospikeCacheTagsChecksumTest extends TestCase {
   private AerospikeConnection $connection;
 
   /**
-   * Mock logger.
+   * Mock logger channel (returned by the factory mock).
    *
    * @var \Psr\Log\LoggerInterface|\PHPUnit\Framework\MockObject\MockObject
    */
-  private LoggerInterface $logger;
+  private LoggerInterface $loggerChannel;
+
+  /**
+   * Mock logger factory.
+   *
+   * @var \Drupal\Core\Logger\LoggerChannelFactoryInterface|\PHPUnit\Framework\MockObject\MockObject
+   */
+  private LoggerChannelFactoryInterface $loggerFactory;
 
   /**
    * {@inheritdoc}
    */
   protected function setUp(): void {
     parent::setUp();
-    $this->connection = $this->createMock(AerospikeConnection::class);
-    $this->logger     = $this->createMock(LoggerInterface::class);
+    $this->connection    = $this->createMock(AerospikeConnection::class);
+    $this->loggerChannel = $this->createMock(LoggerInterface::class);
+    $this->loggerFactory = $this->createMock(LoggerChannelFactoryInterface::class);
+    $this->loggerFactory->method('get')->willReturn($this->loggerChannel);
   }
 
   /**
    * Returns a fresh checksum instance for each test.
    */
   private function checksum(): AerospikeCacheTagsChecksum {
-    return new AerospikeCacheTagsChecksum($this->connection, $this->logger);
+    return new AerospikeCacheTagsChecksum($this->connection, $this->loggerFactory);
   }
 
   /**
@@ -56,7 +66,7 @@ class AerospikeCacheTagsChecksumTest extends TestCase {
   public function testGetCurrentChecksumReturnsZeroOnConnectionFailure(): void {
     $this->connection->method('getClient')
       ->willThrowException(new \RuntimeException('ACM unreachable'));
-    $this->logger->expects($this->once())->method('error');
+    $this->loggerChannel->expects($this->once())->method('error');
 
     $result = $this->checksum()->getCurrentChecksum(['node:1', 'user:2']);
     $this->assertSame('0', $result);
@@ -95,7 +105,7 @@ class AerospikeCacheTagsChecksumTest extends TestCase {
   public function testInvalidateTagsSwallowsConnectionException(): void {
     $this->connection->method('getClient')
       ->willThrowException(new \RuntimeException('ACM unreachable'));
-    $this->logger->expects($this->once())->method('error');
+    $this->loggerChannel->expects($this->once())->method('error');
 
     // Must not throw.
     $this->checksum()->invalidateTags(['node:1']);
@@ -118,7 +128,7 @@ class AerospikeCacheTagsChecksumTest extends TestCase {
       ->willThrowException(new \RuntimeException('ACM unreachable'));
 
     // Only one log entry even though two operations fail.
-    $this->logger->expects($this->once())->method('error');
+    $this->loggerChannel->expects($this->once())->method('error');
 
     $checksum = $this->checksum();
     $checksum->getCurrentChecksum(['node:1']);

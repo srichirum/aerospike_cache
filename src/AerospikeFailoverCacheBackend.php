@@ -3,7 +3,7 @@
 namespace Drupal\aerospike_cache;
 
 use Drupal\Core\Cache\CacheBackendInterface;
-use Psr\Log\LoggerInterface;
+use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 
 /**
  * Cache backend decorator that fails over from Aerospike to a fallback backend.
@@ -33,7 +33,7 @@ class AerospikeFailoverCacheBackend implements CacheBackendInterface {
     protected CacheBackendInterface $aerospike,
     protected CacheBackendInterface $fallback,
     protected AerospikeConnection $connection,
-    protected LoggerInterface $logger,
+    protected LoggerChannelFactoryInterface $loggerFactory,
   ) {}
 
   /**
@@ -43,7 +43,9 @@ class AerospikeFailoverCacheBackend implements CacheBackendInterface {
     if (!$this->connection->isAvailable()) {
       if (!$this->failoverWarned) {
         $this->failoverWarned = TRUE;
-        $this->logger->warning(
+        // Channel resolved lazily to avoid circular dependency:
+        // failover backend -> logger channel -> cache -> failover backend.
+        $this->loggerFactory->get('aerospike_cache')->warning(
           'Aerospike unreachable — failing over to database cache.'
         );
       }

@@ -17,7 +17,7 @@ use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Cache\Cache;
 use Drupal\Core\Cache\CacheBackendInterface;
 use Drupal\Core\Cache\CacheTagsChecksumInterface;
-use Psr\Log\LoggerInterface;
+use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 
 /**
  * Aerospike cache backend implementing CacheBackendInterface.
@@ -57,15 +57,15 @@ class AerospikeCacheBackend implements CacheBackendInterface {
    *   The cache tags checksum provider.
    * @param \Drupal\Component\Datetime\TimeInterface $time
    *   The time service.
-   * @param \Psr\Log\LoggerInterface $logger
-   *   The logger channel for I/O failures.
+   * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $loggerFactory
+   *   The logger factory; channel resolved lazily to avoid circular deps.
    */
   public function __construct(
     protected string $bin,
     protected AerospikeConnection $connection,
     protected CacheTagsChecksumInterface $checksum,
     protected TimeInterface $time,
-    protected LoggerInterface $logger,
+    protected LoggerChannelFactoryInterface $loggerFactory,
   ) {}
 
   /**
@@ -341,11 +341,12 @@ class AerospikeCacheBackend implements CacheBackendInterface {
   protected function logError(string $op, \Throwable $e): void {
     if (!$this->errorLogged) {
       $this->errorLogged = TRUE;
-      $this->logger->error('Aerospike cache @op failed on bin "@bin": @msg', [
-        '@op' => $op,
-        '@bin' => $this->bin,
-        '@msg' => $e->getMessage(),
-      ]);
+      // Channel is resolved lazily here (not at construction time) to avoid
+      // a circular dependency: backend -> logger channel -> cache -> backend.
+      $this->loggerFactory->get('aerospike_cache')->error(
+        'Aerospike cache @op failed on bin "@bin": @msg',
+        ['@op' => $op, '@bin' => $this->bin, '@msg' => $e->getMessage()],
+      );
     }
   }
 

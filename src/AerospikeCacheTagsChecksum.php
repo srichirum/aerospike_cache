@@ -11,7 +11,7 @@ use Aerospike\Bin;
 use Aerospike\Operation;
 use Drupal\Core\Cache\CacheTagsChecksumInterface;
 use Drupal\Core\Cache\CacheTagsInvalidatorInterface;
-use Psr\Log\LoggerInterface;
+use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 
 /**
  * Aerospike-backed implementation of CacheTagsChecksumInterface.
@@ -44,7 +44,7 @@ class AerospikeCacheTagsChecksum implements CacheTagsChecksumInterface, CacheTag
 
   public function __construct(
     protected AerospikeConnection $connection,
-    protected LoggerInterface $logger,
+    protected LoggerChannelFactoryInterface $loggerFactory,
   ) {}
 
   /**
@@ -133,10 +133,12 @@ class AerospikeCacheTagsChecksum implements CacheTagsChecksumInterface, CacheTag
   protected function logError(string $op, \Throwable $e): void {
     if (!$this->errorLogged) {
       $this->errorLogged = TRUE;
-      $this->logger->error('Aerospike cache tags @op failed: @msg', [
-        '@op' => $op,
-        '@msg' => $e->getMessage(),
-      ]);
+      // Channel is resolved lazily here (not at construction time) to avoid
+      // a circular dependency: checksum -> logger channel -> cache -> checksum.
+      $this->loggerFactory->get('aerospike_cache')->error(
+        'Aerospike cache tags @op failed: @msg',
+        ['@op' => $op, '@msg' => $e->getMessage()],
+      );
     }
   }
 
