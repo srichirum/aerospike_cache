@@ -1,0 +1,43 @@
+services:
+
+  logger.channel.aerospike_cache:
+    parent: logger.channel_base
+    arguments: ['aerospike_cache']
+
+  # Manages the connection to the Aerospike Connection Manager (ACM) daemon.
+  # Reads socket path and namespace from $settings (see README for keys).
+  aerospike_cache.connection:
+    class: Drupal\aerospike_cache\AerospikeConnection
+    arguments: ['@settings']
+
+  # Alias so other services can inject the checksum provider by module name.
+  # AerospikeCacheServiceProvider replaces the real definition at compile time.
+  aerospike_cache.tags_checksum:
+    alias: cache_tags.invalidator.checksum
+
+  # Direct Aerospike cache factory. Use this when you want Aerospike only,
+  # with no automatic fallback. All cache operations fail soft on ACM failure.
+  cache.backend.aerospike:
+    class: Drupal\aerospike_cache\AerospikeCacheBackendFactory
+    arguments:
+      - '@aerospike_cache.connection'
+      - '@aerospike_cache.tags_checksum'
+      - '@datetime.time'
+      - '@logger.channel.aerospike_cache'
+    tags:
+      - { name: cache.bin_factory }
+
+  # Aerospike cache factory with automatic database fallback.
+  # On each request the ACM socket is probed once. If unreachable, all cache
+  # operations for that request transparently route to the database backend.
+  # Recovery is automatic — no deployment required when Aerospike comes back.
+  # Recommended for production use over cache.backend.aerospike.
+  cache.backend.aerospike_failover:
+    class: Drupal\aerospike_cache\AerospikeFailoverCacheBackendFactory
+    arguments:
+      - '@cache.backend.aerospike'
+      - '@cache.backend.database'
+      - '@aerospike_cache.connection'
+      - '@logger.channel.aerospike_cache'
+    tags:
+      - { name: cache.bin_factory }

@@ -1,0 +1,56 @@
+<?php
+
+/**
+ * @file
+ * Install, update and uninstall functions for the aerospike_cache module.
+ */
+
+/**
+ * Implements hook_requirements().
+ */
+function aerospike_cache_requirements($phase) {
+  $requirements = [];
+
+  if ($phase !== 'runtime') {
+    return $requirements;
+  }
+
+  if (!extension_loaded('aerospike_php')) {
+    $requirements['aerospike_cache_extension'] = [
+      'title'       => t('Aerospike PHP extension'),
+      'severity'    => REQUIREMENT_ERROR,
+      'description' => t('The aerospike_php PHP extension is not loaded. Build it from <a href="https://github.com/aerospike/php-client">aerospike/php-client</a> and enable it in php.ini.'),
+    ];
+    return $requirements;
+  }
+
+  $requirements['aerospike_cache_extension'] = [
+    'title'    => t('Aerospike PHP extension'),
+    'severity' => REQUIREMENT_OK,
+    'value'    => t('Loaded'),
+  ];
+
+  /** @var \Drupal\aerospike_cache\AerospikeConnection $connection */
+  $connection = \Drupal::service('aerospike_cache.connection');
+
+  if (!$connection->isAvailable()) {
+    $requirements['aerospike_cache_connection'] = [
+      'title'       => t('Aerospike connection'),
+      'severity'    => REQUIREMENT_ERROR,
+      'description' => t('Cannot connect to Aerospike via the ACM socket at @socket. Ensure the Aerospike Connection Manager daemon is running.', [
+        '@socket' => $connection->getSocket(),
+      ]),
+    ];
+  }
+  else {
+    $requirements['aerospike_cache_connection'] = [
+      'title'    => t('Aerospike connection'),
+      'severity' => REQUIREMENT_OK,
+      'value'    => t('Connected (@namespace)', [
+        '@namespace' => $connection->getNamespace(),
+      ]),
+    ];
+  }
+
+  return $requirements;
+}

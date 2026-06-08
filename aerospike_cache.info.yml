@@ -1,0 +1,7 @@
+name: 'Aerospike Cache'
+type: module
+description: 'Provides Aerospike as a high-performance Drupal cache backend. Supports cache tag invalidation, automatic database failover, and the Aerospike Connection Manager (ACM) for connection pooling via Unix socket.'
+core_version_requirement: ^11
+package: Performance & Scalability
+dependencies:
+  - drupal:system

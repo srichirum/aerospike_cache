@@ -1,0 +1,109 @@
+# Aerospike Cache
+
+Provides [Aerospike](https://aerospike.com) as a high-performance cache backend
+for Drupal. Supports cache tag invalidation, automatic database failover, and
+connection pooling via the Aerospike Connection Manager (ACM).
+
+## Requirements
+
+- Drupal 11 or later
+- PHP 8.3 or later
+- [aerospike/php-client](https://github.com/aerospike/php-client) PHP extension
+  (Rust-based, compiled from source)
+- Aerospike Connection Manager (ACM) daemon running and accessible via Unix
+  socket (bundled in the aerospike/php-client repository)
+
+## Architecture
+
+PHP communicates with the ACM daemon over a local gRPC Unix socket. The ACM
+manages TCP connection pooling to the remote Aerospike cluster, keeping PHP
+processes stateless.
+
+```
+Drupal → AerospikeCacheBackend → ACM (Unix socket) → Aerospike cluster
+```
+
+Each Drupal cache bin maps to an Aerospike set within the configured namespace.
+Cache tag invalidation is handled by atomically incrementing per-tag counters
+in a dedicated `cachetags` set. Checksums are computed as the sum of those
+counters, matching the semantics of Drupal's database cache tag implementation.
+
+## Installation
+
+1. Build and install the `aerospike/php-client` PHP extension and enable it in
+   `php.ini`:
+
+   ```ini
+   extension=libaerospike_php.so
+   ```
+
+2. Run and configure the ACM daemon so it can reach your Aerospike cluster.
+   By default the ACM writes its socket to `/tmp/asld_grpc.sock`.
+
+3. Enable the module:
+
+   ```bash
+   drush en aerospike_cache
+   ```
+
+4. Add the following to `settings.php`:
+
+   ```php
+   // ACM socket path and Aerospike namespace.
+   $settings['aerospike_cache_socket']    = '/tmp/asld_grpc.sock';
+   $settings['aerospike_cache_namespace'] = 'drupal';
+
+   if (extension_loaded('aerospike_php')) {
+     // Use aerospike_failover for automatic database fallback (recommended),
+     // or aerospike for Aerospike-only with fail-soft error handling.
+     $settings['cache']['default'] = 'cache.backend.aerospike_failover';
+
+     // Optional: use APCu as a fast in-process tier for bins read on every
+     // request. Requires the APCu PHP extension.
+     $settings['cache']['bootstrap'] = 'cache.backend.chained_fast';
+     $settings['cache']['config']    = 'cache.backend.chained_fast';
+     $settings['cache']['discovery'] = 'cache.backend.chained_fast';
+   }
+   ```
+
+## Cache backends
+
+### `cache.backend.aerospike`
+
+Direct Aerospike backend. All cache operations fail soft — reads return FALSE
+on error (treated as a miss), writes are silently dropped. Use this if you
+prefer to handle availability concerns at the infrastructure level.
+
+### `cache.backend.aerospike_failover`
+
+Aerospike primary with automatic database fallback. On each request the ACM
+socket is probed once. If unreachable, all cache operations for that request
+transparently route to the database backend. Recovery is automatic on the next
+request. Recommended for production.
+
+## Configuration reference
+
+All settings are read from Drupal's `$settings` array. Environment variables
+are used as fallbacks where noted.
+
+| Setting | Default | Environment variable |
+|---|---|---|
+| `aerospike_cache_socket` | `/tmp/asld_grpc.sock` | `AEROSPIKE_SOCKET` |
+| `aerospike_cache_namespace` | `drupal` | `AEROSPIKE_NAMESPACE` |
+
+## Cache tag invalidation
+
+Cache tag invalidation is handled entirely in Aerospike. Each tag has a counter
+record in the `cachetags` set. Invalidating a tag increments its counter
+atomically. On the next read, the stored checksum on the cache item no longer
+matches the current counter sum, and the item is treated as invalid.
+
+This module replaces Drupal's core `cache_tags.invalidator.checksum` service so
+that both writes (invalidations) and reads (checksum lookups) use the same
+Aerospike counters. Without this replacement, tag invalidations would write to
+the database while the Aerospike backend reads its own counters, causing stale
+items to persist indefinitely.
+
+## Maintainers
+
+- Sriharsha Chirumamilla
