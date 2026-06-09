@@ -48,7 +48,7 @@ class AerospikeCacheServiceProvider extends ServiceProviderBase {
       $definition->setClass(AerospikeCacheTagsChecksum::class);
       $definition->setArguments([
         new Reference('aerospike_cache.connection'),
-        new Reference('logger.channel.aerospike_cache'),
+        new Reference('logger.factory'),
       ]);
     }
   }
