@@ -1,0 +1,26 @@
+{
+    "name": "srichirum/aerospike_cache",
+    "description": "Provides Aerospike as a high-performance Drupal cache backend with cache tag invalidation, automatic database failover, and ACM connection pooling.",
+    "type": "drupal-module",
+    "keywords": ["drupal", "cache", "aerospike", "performance", "cache-backend"],
+    "license": "GPL-2.0-or-later",
+    "homepage": "https://github.com/srichirum/aerospike_cache",
+    "authors": [
+        {
+            "name": "Sriharsha Chirumamilla",
+            "homepage": "https://github.com/srichirum",
+            "role": "Maintainer"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/srichirum/aerospike_cache/issues",
+        "source": "https://github.com/srichirum/aerospike_cache"
+    },
+    "require": {
+        "php": ">=8.3",
+        "drupal/core": "^11"
+    },
+    "suggest": {
+        "ext-aerospike_php": "Required at runtime — build from https://github.com/aerospike/php-client. Without it the module's services stay dormant and Drupal falls back to its default cache."
+    }
+}
