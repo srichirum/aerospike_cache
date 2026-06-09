@@ -108,6 +108,42 @@ class AerospikeCacheBackendTest extends KernelTestBase {
   }
 
   /**
+   * Tests that a large item exceeding Aerospike's record limit is compressed.
+   *
+   * A ~2 MB serialized array would exceed the 1 MiB record limit if stored
+   * raw, but compresses well below it and must round-trip intact.
+   */
+  public function testLargeItemIsCompressedAndRoundTrips(): void {
+    $data = [];
+    for ($i = 0; $i < 20000; $i++) {
+      $data[] = ['id' => $i, 'label' => "Item $i", 'markup' => '<div class="card">x</div>'];
+    }
+    $this->assertGreaterThan(1048576, strlen(serialize($data)), 'Fixture must exceed 1 MiB raw.');
+
+    $this->backend->set('large', $data);
+    $item = $this->backend->get('large');
+
+    $this->assertNotFalse($item, 'Large item should be cached after compression.');
+    $this->assertSame($data, $item->data);
+  }
+
+  /**
+   * Tests that an item too large even after compression is skipped cleanly.
+   *
+   * Random bytes do not compress, so a multi-megabyte payload stays over the
+   * limit. set() must skip it silently (cache miss) rather than throwing.
+   */
+  public function testOversizedItemIsSkippedNotErrored(): void {
+    $incompressible = base64_encode(random_bytes(3 * 1024 * 1024));
+
+    // Must not throw.
+    $this->backend->set('oversized', $incompressible);
+
+    // The item is simply absent — a clean cache miss.
+    $this->assertFalse($this->backend->get('oversized'));
+  }
+
+  /**
    * Tests that cache tags are stored and returned with the item.
    */
   public function testSetWithTags(): void {

@@ -45,6 +45,16 @@ class AerospikeConnection {
   protected string $namespace;
 
   /**
+   * Maximum stored payload size in bytes before an item is skipped.
+   */
+  protected int $maxRecordSize;
+
+  /**
+   * Serialized-size threshold (bytes) above which payloads are compressed.
+   */
+  protected int $compressThreshold;
+
+  /**
    * Constructs an AerospikeConnection.
    *
    * @param \Drupal\Core\Site\Settings $settings
@@ -53,6 +63,11 @@ class AerospikeConnection {
   public function __construct(Settings $settings) {
     $this->socket    = $settings->get('aerospike_cache_socket', getenv('AEROSPIKE_SOCKET') ?: '/tmp/asld_grpc.sock');
     $this->namespace = $settings->get('aerospike_cache_namespace', getenv('AEROSPIKE_NAMESPACE') ?: 'drupal');
+    // Aerospike caps each record at max-record-size (default 1 MiB). Keep the
+    // stored payload safely under that to leave room for the other bins and
+    // record overhead. Tunable for clusters configured with a larger limit.
+    $this->maxRecordSize     = (int) $settings->get('aerospike_cache_max_record_size', 1000000);
+    $this->compressThreshold = (int) $settings->get('aerospike_cache_compress_threshold', 4096);
   }
 
   /**
@@ -97,6 +112,20 @@ class AerospikeConnection {
    */
   public function getNamespace(): string {
     return $this->namespace;
+  }
+
+  /**
+   * Returns the maximum stored payload size in bytes.
+   */
+  public function getMaxRecordSize(): int {
+    return $this->maxRecordSize;
+  }
+
+  /**
+   * Returns the serialized-size threshold above which payloads are compressed.
+   */
+  public function getCompressThreshold(): int {
+    return $this->compressThreshold;
   }
 
   /**

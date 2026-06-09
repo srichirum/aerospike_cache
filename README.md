@@ -90,6 +90,40 @@ are used as fallbacks where noted.
 |---|---|---|
 | `aerospike_cache_socket` | `/tmp/asld_grpc.sock` | `AEROSPIKE_SOCKET` |
 | `aerospike_cache_namespace` | `drupal` | `AEROSPIKE_NAMESPACE` |
+| `aerospike_cache_max_record_size` | `1000000` | — |
+| `aerospike_cache_compress_threshold` | `4096` | — |
+
+## Large items and record size limits
+
+Aerospike caps each record at `max-record-size` (default **1 MiB**). Some Drupal
+cache items — large plugin/discovery data, big render arrays — exceed this. The
+module handles oversized items in two stages:
+
+1. **Compression.** Any payload whose serialized size exceeds
+   `aerospike_cache_compress_threshold` is gzip-compressed (and base64-encoded,
+   since the client only accepts UTF-8 strings in a bin). Drupal cache data
+   typically compresses 5–10×, so most large items fit comfortably.
+2. **Size guard.** If an item is still over `aerospike_cache_max_record_size`
+   after compression, it is skipped — not cached — and a single warning is
+   logged per request. The item is simply recomputed on the next request; the
+   site never errors.
+
+If your Aerospike cluster is configured with a larger `max-record-size` (up to
+its 8 MiB ceiling), raise `aerospike_cache_max_record_size` to match so the
+module makes full use of it:
+
+```
+# In the namespace stanza of aerospike.conf:
+namespace drupal {
+  ...
+  max-record-size 8M
+}
+```
+
+```php
+// settings.php — must not exceed the cluster's configured max-record-size.
+$settings['aerospike_cache_max_record_size'] = 8000000;
+```
 
 ## Cache tag invalidation
 

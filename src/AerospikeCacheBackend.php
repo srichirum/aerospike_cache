@@ -46,6 +46,13 @@ class AerospikeCacheBackend implements CacheBackendInterface {
   private bool $errorLogged = FALSE;
 
   /**
+   * Whether an oversized-item skip has already been logged this request.
+   *
+   * @var bool
+   */
+  private bool $oversizedLogged = FALSE;
+
+  /**
    * Constructs an AerospikeCacheBackend.
    *
    * @param string $bin
@@ -145,8 +152,28 @@ class AerospikeCacheBackend implements CacheBackendInterface {
       $wp->expiration = Expiration::NamespaceDefault();
     }
 
+    // Encode the payload. Large items are compressed; the result is base64'd
+    // because the Aerospike client only accepts UTF-8 strings in a bin, not
+    // raw binary (gzcompress output). A 'zip' flag records the encoding so
+    // prepareItem() can reverse it.
+    $serialized = serialize($data);
+    $compress = function_exists('gzcompress')
+      && strlen($serialized) > $this->connection->getCompressThreshold();
+    $payload = $compress ? base64_encode(gzcompress($serialized, 6)) : $serialized;
+
+    // Size guard: Aerospike rejects records over max-record-size (default
+    // 1 MiB) with "record size exceeds limit". Skip such items rather than
+    // letting the write fail and flood the log — the item is simply recomputed
+    // on the next request. Compression above already shrinks most large items
+    // enough to fit; this catches the rare item that is still too big.
+    if (strlen($payload) > $this->connection->getMaxRecordSize()) {
+      $this->logOversized($cid, strlen($payload));
+      return;
+    }
+
     $bins = [
-      new Bin('data', serialize($data)),
+      new Bin('data', $payload),
+      new Bin('zip', $compress ? 1 : 0),
       new Bin('created', $this->time->getRequestTime()),
       new Bin('expire', $expire),
       new Bin('tags', implode(' ', $tags)),
@@ -301,6 +328,13 @@ class AerospikeCacheBackend implements CacheBackendInterface {
 
     $item = new \stdClass();
     $item->cid = $cid;
+    // Reverse the set() encoding: base64-decode and inflate when the 'zip'
+    // flag is set. Older or uncompressed records (zip = 0/absent) are read
+    // as-is.
+    $raw = $bins['data'];
+    if (!empty($bins['zip'])) {
+      $raw = gzuncompress(base64_decode($raw));
+    }
     // Cache data legitimately contains objects (render arrays, config, entity
     // values), so classes must be allowed — matching core's DatabaseBackend,
     // which unserialize()s cache data the same way. The data is written only by
@@ -308,7 +342,7 @@ class AerospikeCacheBackend implements CacheBackendInterface {
     // socket; it is trusted to the same degree as the database cache.
     // allowed_classes is stated explicitly to document the decision.
     // phpcs:ignore DrupalPractice.FunctionCalls.InsecureUnserialize.InsecureUnserialize
-    $item->data = unserialize($bins['data'], ['allowed_classes' => TRUE]);
+    $item->data = unserialize($raw, ['allowed_classes' => TRUE]);
     $item->created = (int) ($bins['created'] ?? 0);
     $item->expire = (int) ($bins['expire'] ?? Cache::PERMANENT);
     $item->tags = $bins['tags'] ? explode(' ', $bins['tags']) : [];
@@ -349,6 +383,29 @@ class AerospikeCacheBackend implements CacheBackendInterface {
       ($this->loggerFactory)()->get('aerospike_cache')->error(
         'Aerospike cache @op failed on bin "@bin": @msg',
         ['@op' => $op, '@bin' => $this->bin, '@msg' => $e->getMessage()],
+      );
+    }
+  }
+
+  /**
+   * Logs a skipped oversized item once per request to avoid log flooding.
+   *
+   * @param string $cid
+   *   The cache ID that was skipped.
+   * @param int $size
+   *   The encoded payload size in bytes.
+   */
+  protected function logOversized(string $cid, int $size): void {
+    if (!$this->oversizedLogged) {
+      $this->oversizedLogged = TRUE;
+      ($this->loggerFactory)()->get('aerospike_cache')->warning(
+        'Aerospike cache skipped oversized item "@cid" on bin "@bin": @size bytes exceeds the @max byte limit. The item is not cached and will be recomputed.',
+        [
+          '@cid' => $cid,
+          '@bin' => $this->bin,
+          '@size' => $size,
+          '@max' => $this->connection->getMaxRecordSize(),
+        ],
       );
     }
   }
