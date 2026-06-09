@@ -249,9 +249,10 @@ class AerospikeCacheBackend implements CacheBackendInterface {
    * {@inheritdoc}
    */
   public function invalidateAll(): void {
-    // No partial-scan API is available, so truncate the bin. Callers relying on
-    // stale-while-revalidate lose the stale copy here; acceptable for the bins
-    // this backend serves, and avoids an expensive full scan.
+    // A full scan is possible but deliberately avoided: truncate is a single
+    // server-side command, whereas scanning to mark each record invalid would
+    // read and rewrite every record. Stale-while-revalidate callers lose the
+    // stale copy here; acceptable for the bins this backend serves.
     $this->deleteAll();
   }
 
