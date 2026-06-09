@@ -54,16 +54,17 @@ class AerospikeCacheBackendTest extends KernelTestBase {
       $this->markTestSkipped('Aerospike ACM socket not reachable.');
     }
 
-    $checksum       = $this->container->get('cache_tags.invalidator.checksum');
-    $time           = $this->container->get('datetime.time');
-    $loggerFactory  = $this->container->get('logger.factory');
+    $checksum = $this->container->get('cache_tags.invalidator.checksum');
+    $time     = $this->container->get('datetime.time');
+    // The backend constructor takes a service closure returning logger.factory.
+    $loggerClosure = fn() => $this->container->get('logger.factory');
 
     $this->backend = new AerospikeCacheBackend(
       'test_' . $this->randomMachineName(),
       $this->connection,
       $checksum,
       $time,
-      $loggerFactory,
+      $loggerClosure,
     );
   }
 
@@ -184,7 +185,7 @@ class AerospikeCacheBackendTest extends KernelTestBase {
       $brokenConn,
       $this->container->get('cache_tags.invalidator.checksum'),
       $this->container->get('datetime.time'),
-      $this->container->get('logger.factory'),
+      fn() => $this->container->get('logger.factory'),
     );
 
     $cids   = ['a', 'b'];
@@ -207,7 +208,7 @@ class AerospikeCacheBackendTest extends KernelTestBase {
       $brokenConn,
       $this->container->get('cache_tags.invalidator.checksum'),
       $this->container->get('datetime.time'),
-      $this->container->get('logger.factory'),
+      fn() => $this->container->get('logger.factory'),
     );
 
     // Must not throw even when Aerospike is unreachable.

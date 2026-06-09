@@ -3,7 +3,6 @@
 namespace Drupal\aerospike_cache;
 
 use Drupal\Core\Cache\CacheFactoryInterface;
-use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 
 /**
  * Factory that creates an AerospikeFailoverCacheBackend instance per cache bin.
@@ -21,7 +20,7 @@ class AerospikeFailoverCacheBackendFactory implements CacheFactoryInterface {
     protected CacheFactoryInterface $aerospikeFactory,
     protected CacheFactoryInterface $databaseFactory,
     protected AerospikeConnection $connection,
-    protected LoggerChannelFactoryInterface $loggerFactory,
+    protected \Closure $loggerFactory,
   ) {}
 
   /**

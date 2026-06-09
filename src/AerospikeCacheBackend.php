@@ -17,7 +17,6 @@ use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Cache\Cache;
 use Drupal\Core\Cache\CacheBackendInterface;
 use Drupal\Core\Cache\CacheTagsChecksumInterface;
-use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 
 /**
  * Aerospike cache backend implementing CacheBackendInterface.
@@ -57,15 +56,18 @@ class AerospikeCacheBackend implements CacheBackendInterface {
    *   The cache tags checksum provider.
    * @param \Drupal\Component\Datetime\TimeInterface $time
    *   The time service.
-   * @param \Drupal\Core\Logger\LoggerChannelFactoryInterface $loggerFactory
-   *   The logger factory; channel resolved lazily to avoid circular deps.
+   * @param \Closure $loggerFactory
+   *   A service closure returning the logger.factory. Injected lazily (not as
+   *   a direct reference) so the logger graph is never traversed at container
+   *   compile time — otherwise a site logger that depends on a cache backend
+   *   would create a circular dependency.
    */
   public function __construct(
     protected string $bin,
     protected AerospikeConnection $connection,
     protected CacheTagsChecksumInterface $checksum,
     protected TimeInterface $time,
-    protected LoggerChannelFactoryInterface $loggerFactory,
+    protected \Closure $loggerFactory,
   ) {}
 
   /**
@@ -342,9 +344,9 @@ class AerospikeCacheBackend implements CacheBackendInterface {
   protected function logError(string $op, \Throwable $e): void {
     if (!$this->errorLogged) {
       $this->errorLogged = TRUE;
-      // Channel is resolved lazily here (not at construction time) to avoid
-      // a circular dependency: backend -> logger channel -> cache -> backend.
-      $this->loggerFactory->get('aerospike_cache')->error(
+      // Resolve the factory at runtime by invoking the service closure — never
+      // at compile time. This is what breaks the circular dependency.
+      ($this->loggerFactory)()->get('aerospike_cache')->error(
         'Aerospike cache @op failed on bin "@bin": @msg',
         ['@op' => $op, '@bin' => $this->bin, '@msg' => $e->getMessage()],
       );

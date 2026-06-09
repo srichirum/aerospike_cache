@@ -47,7 +47,8 @@ class AerospikeCacheTagsChecksumKernelTest extends KernelTestBase {
     // provider has replaced cache_tags.invalidator.checksum in the container.
     $this->checksum = new AerospikeCacheTagsChecksum(
       $connection,
-      $this->container->get('logger.factory'),
+      // The constructor takes a service closure returning logger.factory.
+      fn() => $this->container->get('logger.factory'),
     );
   }
 

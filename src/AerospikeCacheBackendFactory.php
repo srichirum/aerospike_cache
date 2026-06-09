@@ -5,7 +5,6 @@ namespace Drupal\aerospike_cache;
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Cache\CacheFactoryInterface;
 use Drupal\Core\Cache\CacheTagsChecksumInterface;
-use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 
 /**
  * Factory that creates an AerospikeCacheBackend instance per cache bin.
@@ -20,7 +19,7 @@ class AerospikeCacheBackendFactory implements CacheFactoryInterface {
     protected AerospikeConnection $connection,
     protected CacheTagsChecksumInterface $checksum,
     protected TimeInterface $time,
-    protected LoggerChannelFactoryInterface $loggerFactory,
+    protected \Closure $loggerFactory,
   ) {}
 
   /**

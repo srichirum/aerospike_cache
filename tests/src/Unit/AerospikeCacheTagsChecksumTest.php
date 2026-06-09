@@ -50,7 +50,8 @@ class AerospikeCacheTagsChecksumTest extends TestCase {
    * Returns a fresh checksum instance for each test.
    */
   private function checksum(): AerospikeCacheTagsChecksum {
-    return new AerospikeCacheTagsChecksum($this->connection, $this->loggerFactory);
+    // The constructor takes a service closure returning the logger factory.
+    return new AerospikeCacheTagsChecksum($this->connection, fn() => $this->loggerFactory);
   }
 
   /**

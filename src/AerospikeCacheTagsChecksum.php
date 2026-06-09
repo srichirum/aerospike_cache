@@ -11,7 +11,6 @@ use Aerospike\Bin;
 use Aerospike\Operation;
 use Drupal\Core\Cache\CacheTagsChecksumInterface;
 use Drupal\Core\Cache\CacheTagsInvalidatorInterface;
-use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 
 /**
  * Aerospike-backed implementation of CacheTagsChecksumInterface.
@@ -42,9 +41,20 @@ class AerospikeCacheTagsChecksum implements CacheTagsChecksumInterface, CacheTag
    */
   private bool $errorLogged = FALSE;
 
+  /**
+   * Constructs the checksum provider.
+   *
+   * @param \Drupal\aerospike_cache\AerospikeConnection $connection
+   *   The Aerospike connection.
+   * @param \Closure $loggerFactory
+   *   A service closure returning the logger.factory. Injected lazily (not as
+   *   a direct reference) to avoid a circular dependency when a logger in the
+   *   consuming site depends on a cache backend:
+   *   checksum -> logger.factory -> [site logger] -> cache.default -> checksum.
+   */
   public function __construct(
     protected AerospikeConnection $connection,
-    protected LoggerChannelFactoryInterface $loggerFactory,
+    protected \Closure $loggerFactory,
   ) {}
 
   /**
@@ -133,9 +143,10 @@ class AerospikeCacheTagsChecksum implements CacheTagsChecksumInterface, CacheTag
   protected function logError(string $op, \Throwable $e): void {
     if (!$this->errorLogged) {
       $this->errorLogged = TRUE;
-      // Channel is resolved lazily here (not at construction time) to avoid
-      // a circular dependency: checksum -> logger channel -> cache -> checksum.
-      $this->loggerFactory->get('aerospike_cache')->error(
+      // The factory is resolved here, at runtime, by invoking the service
+      // closure — never at container compile time. This is what breaks the
+      // circular dependency described in the constructor.
+      ($this->loggerFactory)()->get('aerospike_cache')->error(
         'Aerospike cache tags @op failed: @msg',
         ['@op' => $op, '@msg' => $e->getMessage()],
       );

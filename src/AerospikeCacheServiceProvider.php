@@ -5,6 +5,7 @@ namespace Drupal\aerospike_cache;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\DependencyInjection\ServiceProviderBase;
 use Drupal\Core\Site\Settings;
+use Symfony\Component\DependencyInjection\Argument\ServiceClosureArgument;
 use Symfony\Component\DependencyInjection\Reference;
 
 /**
@@ -48,7 +49,10 @@ class AerospikeCacheServiceProvider extends ServiceProviderBase {
       $definition->setClass(AerospikeCacheTagsChecksum::class);
       $definition->setArguments([
         new Reference('aerospike_cache.connection'),
-        new Reference('logger.factory'),
+        // Lazy service closure, not a direct reference: keeps the logger graph
+        // out of compile-time resolution so a site logger that depends on a
+        // cache backend cannot form a circular dependency through the checksum.
+        new ServiceClosureArgument(new Reference('logger.factory')),
       ]);
     }
   }

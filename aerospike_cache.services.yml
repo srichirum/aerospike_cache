@@ -19,7 +19,10 @@ services:
       - '@aerospike_cache.connection'
       - '@aerospike_cache.tags_checksum'
       - '@datetime.time'
-      - '@logger.factory'
+      # Lazy service closure, not a direct reference: prevents the logger graph
+      # from being traversed at compile time, which would otherwise form a
+      # circular dependency via any site logger that depends on a cache backend.
+      - !service_closure '@logger.factory'
     tags:
       - { name: cache.bin_factory }
 
@@ -34,6 +37,7 @@ services:
       - '@cache.backend.aerospike'
       - '@cache.backend.database'
       - '@aerospike_cache.connection'
-      - '@logger.factory'
+      # Lazy service closure — see note on cache.backend.aerospike above.
+      - !service_closure '@logger.factory'
     tags:
       - { name: cache.bin_factory }

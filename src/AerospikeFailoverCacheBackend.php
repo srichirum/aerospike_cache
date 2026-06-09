@@ -3,7 +3,6 @@
 namespace Drupal\aerospike_cache;
 
 use Drupal\Core\Cache\CacheBackendInterface;
-use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 
 /**
  * Cache backend decorator that fails over from Aerospike to a fallback backend.
@@ -29,11 +28,24 @@ class AerospikeFailoverCacheBackend implements CacheBackendInterface {
    */
   private bool $failoverWarned = FALSE;
 
+  /**
+   * Constructs the failover backend decorator.
+   *
+   * @param \Drupal\Core\Cache\CacheBackendInterface $aerospike
+   *   The primary (Aerospike) backend.
+   * @param \Drupal\Core\Cache\CacheBackendInterface $fallback
+   *   The fallback (typically database) backend.
+   * @param \Drupal\aerospike_cache\AerospikeConnection $connection
+   *   The Aerospike connection, used to probe availability.
+   * @param \Closure $loggerFactory
+   *   A service closure returning the logger.factory. Injected lazily to avoid
+   *   a circular dependency when a site logger depends on a cache backend.
+   */
   public function __construct(
     protected CacheBackendInterface $aerospike,
     protected CacheBackendInterface $fallback,
     protected AerospikeConnection $connection,
-    protected LoggerChannelFactoryInterface $loggerFactory,
+    protected \Closure $loggerFactory,
   ) {}
 
   /**
@@ -43,9 +55,9 @@ class AerospikeFailoverCacheBackend implements CacheBackendInterface {
     if (!$this->connection->isAvailable()) {
       if (!$this->failoverWarned) {
         $this->failoverWarned = TRUE;
-        // Channel resolved lazily to avoid circular dependency:
-        // failover backend -> logger channel -> cache -> failover backend.
-        $this->loggerFactory->get('aerospike_cache')->warning(
+        // Resolve the factory at runtime via the service closure — never at
+        // compile time. This is what breaks the circular dependency.
+        ($this->loggerFactory)()->get('aerospike_cache')->warning(
           'Aerospike unreachable — failing over to database cache.'
         );
       }

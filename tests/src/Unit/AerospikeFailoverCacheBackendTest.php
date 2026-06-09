@@ -71,7 +71,8 @@ class AerospikeFailoverCacheBackendTest extends TestCase {
       $this->aerospike,
       $this->fallback,
       $this->connection,
-      $this->loggerFactory,
+      // The constructor takes a service closure returning the logger factory.
+      fn() => $this->loggerFactory,
     );
   }
 
