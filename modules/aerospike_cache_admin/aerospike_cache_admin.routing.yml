@@ -1,0 +1,7 @@
+aerospike_cache_admin.report:
+  path: '/admin/reports/aerospike'
+  defaults:
+    _controller: '\Drupal\aerospike_cache_admin\Controller\AerospikeStatusController::report'
+    _title: 'Aerospike cache'
+  requirements:
+    _permission: 'administer aerospike cache'

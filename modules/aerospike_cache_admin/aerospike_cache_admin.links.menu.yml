@@ -1,0 +1,5 @@
+aerospike_cache_admin.report:
+  title: 'Aerospike cache'
+  description: 'Connection health, configuration, latency, and per-bin record counts for the Aerospike cache backend.'
+  route_name: aerospike_cache_admin.report
+  parent: system.admin_reports

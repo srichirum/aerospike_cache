@@ -1,0 +1,7 @@
+name: 'Aerospike Cache Admin'
+type: module
+description: 'Status and diagnostics report for the Aerospike cache backend: connection health, configuration, live latency probe, and per-bin record counts.'
+core_version_requirement: ^11
+package: 'Performance & Scalability'
+dependencies:
+  - aerospike_cache:aerospike_cache

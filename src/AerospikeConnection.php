@@ -55,6 +55,11 @@ class AerospikeConnection {
   protected int $compressThreshold;
 
   /**
+   * Optional prefix prepended to every key, for multi-site key isolation.
+   */
+  protected string $prefix;
+
+  /**
    * Constructs an AerospikeConnection.
    *
    * @param \Drupal\Core\Site\Settings $settings
@@ -68,6 +73,9 @@ class AerospikeConnection {
     // record overhead. Tunable for clusters configured with a larger limit.
     $this->maxRecordSize     = (int) $settings->get('aerospike_cache_max_record_size', 1000000);
     $this->compressThreshold = (int) $settings->get('aerospike_cache_compress_threshold', 4096);
+    // Optional key prefix. Lets several Drupal sites share one namespace
+    // without colliding — each site sets a distinct prefix. Empty by default.
+    $this->prefix = (string) $settings->get('aerospike_cache_prefix', getenv('AEROSPIKE_PREFIX') ?: '');
   }
 
   /**
@@ -129,10 +137,20 @@ class AerospikeConnection {
   }
 
   /**
+   * Returns the configured key prefix (empty string if none).
+   */
+  public function getPrefix(): string {
+    return $this->prefix;
+  }
+
+  /**
    * Builds an Aerospike key for the given set and primary key.
+   *
+   * The configured prefix (if any) is prepended to the primary key so that
+   * sites sharing a namespace do not collide.
    */
   public function makeKey(string $set, string $pk): Key {
-    return new Key($this->namespace, $set, $pk);
+    return new Key($this->namespace, $set, $this->prefix . $pk);
   }
 
 }

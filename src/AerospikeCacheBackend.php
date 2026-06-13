@@ -2,6 +2,7 @@
 
 namespace Drupal\aerospike_cache;
 
+use Aerospike\Key;
 use Aerospike\BatchDelete;
 use Aerospike\BatchDeletePolicy;
 use Aerospike\BatchPolicy;
@@ -37,6 +38,14 @@ use Drupal\Core\Cache\CacheTagsChecksumInterface;
  * available.
  */
 class AerospikeCacheBackend implements CacheBackendInterface {
+
+  /**
+   * Maximum number of chunks a single item may be split into.
+   *
+   * Caps the fan-out for pathologically large items; anything that would need
+   * more chunks than this is skipped rather than stored.
+   */
+  protected const MAX_CHUNKS = 32;
 
   /**
    * Whether an I/O error has already been logged this request.
@@ -139,18 +148,7 @@ class AerospikeCacheBackend implements CacheBackendInterface {
     $tags = array_unique($tags);
     sort($tags);
 
-    $wp = new WritePolicy();
-
-    // Aerospike expiration is an \Aerospike\Expiration value object.
-    // NamespaceDefault() = use the namespace's default-ttl (0 / never for our
-    // "drupal" namespace); Seconds(n) = expire n seconds from now.
-    if ($expire !== Cache::PERMANENT) {
-      $ttl = max(1, $expire - $this->time->getRequestTime());
-      $wp->expiration = Expiration::Seconds($ttl);
-    }
-    else {
-      $wp->expiration = Expiration::NamespaceDefault();
-    }
+    $wp = $this->writePolicyFor($expire);
 
     // Encode the payload. Large items are compressed; the result is base64'd
     // because the Aerospike client only accepts UTF-8 strings in a bin, not
@@ -161,18 +159,8 @@ class AerospikeCacheBackend implements CacheBackendInterface {
       && strlen($serialized) > $this->connection->getCompressThreshold();
     $payload = $compress ? base64_encode(gzcompress($serialized, 6)) : $serialized;
 
-    // Size guard: Aerospike rejects records over max-record-size (default
-    // 1 MiB) with "record size exceeds limit". Skip such items rather than
-    // letting the write fail and flood the log — the item is simply recomputed
-    // on the next request. Compression above already shrinks most large items
-    // enough to fit; this catches the rare item that is still too big.
-    if (strlen($payload) > $this->connection->getMaxRecordSize()) {
-      $this->logOversized($cid, strlen($payload));
-      return;
-    }
-
-    $bins = [
-      new Bin('data', $payload),
+    // Metadata bins are common to single and multipart records.
+    $meta = [
       new Bin('zip', $compress ? 1 : 0),
       new Bin('created', $this->time->getRequestTime()),
       new Bin('expire', $expire),
@@ -181,8 +169,36 @@ class AerospikeCacheBackend implements CacheBackendInterface {
       new Bin('valid', 1),
     ];
 
+    $max = $this->connection->getMaxRecordSize();
     try {
-      $this->connection->getClient()->put($wp, $this->connection->makeKey($this->bin, $cid), $bins);
+      $client = $this->connection->getClient();
+
+      if (strlen($payload) <= $max) {
+        // Fits in one record. multipart = 0 marks it as a single item.
+        $bins = array_merge([new Bin('data', $payload), new Bin('multipart', 0)], $meta);
+        $client->put($wp, $this->connection->makeKey($this->bin, $cid), $bins);
+        return;
+      }
+
+      // Too large for one record: split the payload into chunk records and
+      // store a parent that references them. Bounded by MAX_CHUNKS so a
+      // pathologically huge item is skipped rather than fanned out unboundedly.
+      $chunks = str_split($payload, $max);
+      if (count($chunks) > self::MAX_CHUNKS) {
+        $this->logOversized($cid, strlen($payload));
+        return;
+      }
+
+      // Write every chunk first. If any fails, abort without writing the
+      // parent — a missing parent reads as a clean cache miss, whereas a
+      // parent pointing at missing chunks would be unreconstructable.
+      foreach ($chunks as $i => $chunk) {
+        $client->put($wp, $this->chunkKey($cid, $i), [new Bin('data', $chunk)]);
+      }
+
+      // Parent holds metadata and the chunk count, but no data bin.
+      $bins = array_merge([new Bin('multipart', count($chunks))], $meta);
+      $client->put($wp, $this->connection->makeKey($this->bin, $cid), $bins);
     }
     catch (\Throwable $e) {
       $this->logError('set', $e);
@@ -208,7 +224,20 @@ class AerospikeCacheBackend implements CacheBackendInterface {
    */
   public function delete($cid): void {
     try {
-      $this->connection->getClient()->delete(new WritePolicy(), $this->connection->makeKey($this->bin, $cid));
+      $client = $this->connection->getClient();
+      $key = $this->connection->makeKey($this->bin, $cid);
+
+      // Read the parent header first so multipart items also have their chunk
+      // records removed — otherwise permanent (no-TTL) chunks would orphan.
+      // Single items (the common case) carry multipart = 0 and skip this.
+      $record = $client->get(new ReadPolicy(), $key);
+      if ($record !== NULL && !empty($record->bins['multipart'])) {
+        for ($i = 0; $i < (int) $record->bins['multipart']; $i++) {
+          $client->delete(new WritePolicy(), $this->chunkKey($cid, $i));
+        }
+      }
+
+      $client->delete(new WritePolicy(), $key);
     }
     catch (\Throwable $e) {
       $this->logError('delete', $e);
@@ -322,16 +351,25 @@ class AerospikeCacheBackend implements CacheBackendInterface {
    *   The cache item, or FALSE if missing or invalid (and not allowed).
    */
   protected function prepareItem(string $cid, array $bins, bool $allow_invalid): object|false {
-    if (!isset($bins['data'])) {
+    // Reassemble multipart items from their chunk records. A missing chunk
+    // (e.g. evicted by TTL) makes the item unreconstructable — a clean miss.
+    if (!empty($bins['multipart'])) {
+      $raw = $this->readChunks($cid, (int) $bins['multipart']);
+      if ($raw === NULL) {
+        return FALSE;
+      }
+    }
+    elseif (isset($bins['data'])) {
+      $raw = $bins['data'];
+    }
+    else {
       return FALSE;
     }
 
     $item = new \stdClass();
     $item->cid = $cid;
     // Reverse the set() encoding: base64-decode and inflate when the 'zip'
-    // flag is set. Older or uncompressed records (zip = 0/absent) are read
-    // as-is.
-    $raw = $bins['data'];
+    // flag is set. Uncompressed records (zip = 0/absent) are read as-is.
     if (!empty($bins['zip'])) {
       $raw = gzuncompress(base64_decode($raw));
     }
@@ -407,6 +445,80 @@ class AerospikeCacheBackend implements CacheBackendInterface {
           '@max' => $this->connection->getMaxRecordSize(),
         ],
       );
+    }
+  }
+
+  /**
+   * Builds a write policy carrying the correct expiration for an item.
+   *
+   * @param int $expire
+   *   The cache expire timestamp, or Cache::PERMANENT.
+   *
+   * @return \Aerospike\WritePolicy
+   *   The write policy.
+   */
+  protected function writePolicyFor(int $expire): WritePolicy {
+    $wp = new WritePolicy();
+    // NamespaceDefault() uses the namespace default-ttl (0 / never); Seconds(n)
+    // expires n seconds from now.
+    if ($expire !== Cache::PERMANENT) {
+      $wp->expiration = Expiration::Seconds(max(1, $expire - $this->time->getRequestTime()));
+    }
+    else {
+      $wp->expiration = Expiration::NamespaceDefault();
+    }
+    return $wp;
+  }
+
+  /**
+   * Builds the Aerospike key for the Nth chunk of a multipart item.
+   *
+   * @param string $cid
+   *   The parent cache ID.
+   * @param int $index
+   *   The zero-based chunk index.
+   *
+   * @return \Aerospike\Key
+   *   The chunk key, in the parent's set so bulk truncation clears it too.
+   */
+  protected function chunkKey(string $cid, int $index): Key {
+    return $this->connection->makeKey($this->bin, $cid . '::chunk::' . $index);
+  }
+
+  /**
+   * Reads and concatenates the chunk records of a multipart item.
+   *
+   * @param string $cid
+   *   The parent cache ID.
+   * @param int $count
+   *   The number of chunks to read.
+   *
+   * @return string|null
+   *   The reassembled payload, or NULL if any chunk is missing.
+   */
+  protected function readChunks(string $cid, int $count): ?string {
+    try {
+      $brp = new BatchReadPolicy();
+      $reads = [];
+      for ($i = 0; $i < $count; $i++) {
+        $reads[] = new BatchRead($brp, $this->chunkKey($cid, $i), ['data']);
+      }
+      $results = $this->connection->getClient()->batch(new BatchPolicy(), $reads);
+
+      $payload = '';
+      foreach ($results as $result) {
+        $record = $result->getRecord();
+        if ($record === NULL || !isset($record->bins['data'])) {
+          // A chunk is gone; the item cannot be reconstructed.
+          return NULL;
+        }
+        $payload .= $record->bins['data'];
+      }
+      return $payload;
+    }
+    catch (\Throwable $e) {
+      $this->logError('readChunks', $e);
+      return NULL;
     }
   }
 

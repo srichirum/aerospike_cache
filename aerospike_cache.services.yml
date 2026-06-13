@@ -26,6 +26,13 @@ services:
     tags:
       - { name: cache.bin_factory }
 
+  # Lock backend factory. Not wired in by default — to route Drupal's lock
+  # service to Aerospike, override `lock` (and optionally `lock.persistent`)
+  # in your site's services.yml. See the README "Locks" section.
+  aerospike_cache.lock.factory:
+    class: Drupal\aerospike_cache\Lock\AerospikeLockFactory
+    arguments: ['@aerospike_cache.connection']
+
   # Aerospike cache factory with automatic database fallback.
   # On each request the ACM socket is probed once. If unreachable, all cache
   # operations for that request transparently route to the database backend.

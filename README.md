@@ -90,6 +90,7 @@ are used as fallbacks where noted.
 |---|---|---|
 | `aerospike_cache_socket` | `/tmp/asld_grpc.sock` | `AEROSPIKE_SOCKET` |
 | `aerospike_cache_namespace` | `drupal` | `AEROSPIKE_NAMESPACE` |
+| `aerospike_cache_prefix` | `''` (none) | `AEROSPIKE_PREFIX` |
 | `aerospike_cache_max_record_size` | `1000000` | — |
 | `aerospike_cache_compress_threshold` | `4096` | — |
 
@@ -97,16 +98,20 @@ are used as fallbacks where noted.
 
 Aerospike caps each record at `max-record-size` (default **1 MiB**). Some Drupal
 cache items — large plugin/discovery data, big render arrays — exceed this. The
-module handles oversized items in two stages:
+module handles oversized items in three stages:
 
 1. **Compression.** Any payload whose serialized size exceeds
    `aerospike_cache_compress_threshold` is gzip-compressed (and base64-encoded,
    since the client only accepts UTF-8 strings in a bin). Drupal cache data
    typically compresses 5–10×, so most large items fit comfortably.
-2. **Size guard.** If an item is still over `aerospike_cache_max_record_size`
-   after compression, it is skipped — not cached — and a single warning is
-   logged per request. The item is simply recomputed on the next request; the
-   site never errors.
+2. **Splitting.** If an item is still over `aerospike_cache_max_record_size`
+   after compression, it is split into chunk records (stored in the same set,
+   so bulk clears still remove them) with a parent record referencing them.
+   Reads reassemble the chunks; if a chunk has been evicted, the read is a
+   clean cache miss. Items split into at most 32 chunks.
+3. **Size guard.** Only an item that would need more than 32 chunks is skipped
+   — not cached — with a single warning logged per request. The item is simply
+   recomputed on the next request; the site never errors.
 
 If your Aerospike cluster is configured with a larger `max-record-size` (up to
 its 8 MiB ceiling), raise `aerospike_cache_max_record_size` to match so the
@@ -124,6 +129,46 @@ namespace drupal {
 // settings.php — must not exceed the cluster's configured max-record-size.
 $settings['aerospike_cache_max_record_size'] = 8000000;
 ```
+
+## Locks
+
+The module provides an Aerospike-backed lock backend for Drupal's locking
+subsystem (`\Drupal::lock()`). Acquisition uses Aerospike's atomic create-only
+write, and every lock carries a TTL equal to its timeout, so a crashed process
+cannot deadlock the system — the lock is evicted automatically.
+
+It is not enabled by default. To route Drupal's lock service to Aerospike, add
+to your site's `services.yml`:
+
+```yaml
+services:
+  lock:
+    class: Drupal\Core\Lock\LockBackendInterface
+    factory: ['@aerospike_cache.lock.factory', 'get']
+```
+
+## Multi-site key prefixing
+
+To let several Drupal sites share one Aerospike namespace without colliding,
+give each site a distinct prefix. It is prepended to every key (cache and lock).
+
+```php
+$settings['aerospike_cache_prefix'] = 'siteA:';
+```
+
+## Status report (Aerospike Cache Admin)
+
+Enable the `aerospike_cache_admin` submodule for a diagnostics page at
+**Reports → Aerospike cache** (`/admin/reports/aerospike`). It shows:
+
+- Connection health, socket, namespace, prefix, and extension status
+- Configured record-size and compression limits
+- A live write/read/delete round-trip latency probe
+- Per-bin record counts
+
+> Aerospike server-internal statistics (memory, evictions, hit ratio) are
+> reached over the info protocol, which the PHP client does not expose through
+> the ACM socket — so the report covers what is reachable from the application.
 
 ## Cache tag invalidation
 

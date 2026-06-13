@@ -128,19 +128,52 @@ class AerospikeCacheBackendTest extends KernelTestBase {
   }
 
   /**
-   * Tests that an item too large even after compression is skipped cleanly.
+   * Tests that an incompressible item over the limit is split and round-trips.
    *
    * Random bytes do not compress, so a multi-megabyte payload stays over the
-   * limit. set() must skip it silently (cache miss) rather than throwing.
+   * 1 MiB record limit. It must be split into chunk records and reassembled
+   * exactly on read.
    */
-  public function testOversizedItemIsSkippedNotErrored(): void {
+  public function testIncompressibleLargeItemSplitsAndRoundTrips(): void {
     $incompressible = base64_encode(random_bytes(3 * 1024 * 1024));
 
-    // Must not throw.
-    $this->backend->set('oversized', $incompressible);
+    $this->backend->set('multipart', $incompressible);
+    $item = $this->backend->get('multipart');
 
-    // The item is simply absent — a clean cache miss.
-    $this->assertFalse($this->backend->get('oversized'));
+    $this->assertNotFalse($item, 'Oversized item should be split and cached.');
+    $this->assertSame($incompressible, $item->data);
+  }
+
+  /**
+   * Tests that deleting a multipart item also removes its chunk records.
+   */
+  public function testMultipartDeleteRemovesChunks(): void {
+    $incompressible = base64_encode(random_bytes(3 * 1024 * 1024));
+    $this->backend->set('mp_del', $incompressible);
+    $this->assertNotFalse($this->backend->get('mp_del'));
+
+    $this->backend->delete('mp_del');
+    $this->assertFalse($this->backend->get('mp_del'));
+  }
+
+  /**
+   * Tests that an item exceeding the chunk cap is skipped, not split endlessly.
+   *
+   * With a tiny record limit, an incompressible payload would need more than
+   * MAX_CHUNKS chunks, so set() must skip it cleanly rather than fan out.
+   */
+  public function testItemBeyondChunkCapIsSkipped(): void {
+    // 1 KB limit; ~64 KB incompressible needs ~64 chunks > MAX_CHUNKS (32).
+    $tinyLimit = new AerospikeCacheBackend(
+      'test_' . $this->randomMachineName(),
+      new AerospikeConnection(new Settings(['aerospike_cache_max_record_size' => 1000])),
+      $this->container->get('cache_tags.invalidator.checksum'),
+      $this->container->get('datetime.time'),
+      fn() => $this->container->get('logger.factory'),
+    );
+
+    $tinyLimit->set('toobig', base64_encode(random_bytes(64 * 1024)));
+    $this->assertFalse($tinyLimit->get('toobig'));
   }
 
   /**

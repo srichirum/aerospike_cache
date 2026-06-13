@@ -1,0 +1,4 @@
+administer aerospike cache:
+  title: 'Administer Aerospike cache'
+  description: 'View the Aerospike cache status and diagnostics report.'
+  restrict access: true
