@@ -20,13 +20,14 @@ class AerospikeCacheBackendFactory implements CacheFactoryInterface {
     protected CacheTagsChecksumInterface $checksum,
     protected TimeInterface $time,
     protected \Closure $loggerFactory,
+    protected ?AerospikeCacheStats $stats = NULL,
   ) {}
 
   /**
    * {@inheritdoc}
    */
   public function get($bin): AerospikeCacheBackend {
-    return new AerospikeCacheBackend($bin, $this->connection, $this->checksum, $this->time, $this->loggerFactory);
+    return new AerospikeCacheBackend($bin, $this->connection, $this->checksum, $this->time, $this->loggerFactory, $this->stats);
   }
 
 }

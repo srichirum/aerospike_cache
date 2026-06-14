@@ -77,6 +77,9 @@ class AerospikeCacheBackend implements CacheBackendInterface {
    *   a direct reference) so the logger graph is never traversed at container
    *   compile time — otherwise a site logger that depends on a cache backend
    *   would create a circular dependency.
+   * @param \Drupal\aerospike_cache\AerospikeCacheStats|null $stats
+   *   The request-scoped stats collector. Optional; when omitted (or when debug
+   *   is disabled) all instrumentation is skipped at zero cost.
    */
   public function __construct(
     protected string $bin,
@@ -84,25 +87,31 @@ class AerospikeCacheBackend implements CacheBackendInterface {
     protected CacheTagsChecksumInterface $checksum,
     protected TimeInterface $time,
     protected \Closure $loggerFactory,
+    protected ?AerospikeCacheStats $stats = NULL,
   ) {}
 
   /**
    * {@inheritdoc}
    */
   public function get($cid, $allow_invalid = FALSE): object|false {
+    $start = ($this->stats && $this->stats->isEnabled()) ? microtime(TRUE) : 0.0;
     try {
       $client = $this->connection->getClient();
       $record = $client->get(new ReadPolicy(), $this->connection->makeKey($this->bin, $cid));
     }
     catch (\Throwable $e) {
       $this->logError('get', $e);
+      if ($start) {
+        $this->stats->recordGet($this->bin, FALSE, microtime(TRUE) - $start);
+      }
       return FALSE;
     }
 
-    if ($record === NULL) {
-      return FALSE;
+    $item = $record === NULL ? FALSE : $this->prepareItem($cid, $record->bins, $allow_invalid);
+    if ($start) {
+      $this->stats->recordGet($this->bin, $item !== FALSE, microtime(TRUE) - $start);
     }
-    return $this->prepareItem($cid, $record->bins, $allow_invalid);
+    return $item;
   }
 
   /**
@@ -112,6 +121,8 @@ class AerospikeCacheBackend implements CacheBackendInterface {
     if (empty($cids)) {
       return [];
     }
+    $start = ($this->stats && $this->stats->isEnabled()) ? microtime(TRUE) : 0.0;
+    $requested = count($cids);
     $results = [];
     try {
       $client  = $this->connection->getClient();
@@ -136,6 +147,10 @@ class AerospikeCacheBackend implements CacheBackendInterface {
     catch (\Throwable $e) {
       $this->logError('getMultiple', $e);
     }
+    if ($start) {
+      $hits = count($results);
+      $this->stats->recordGetMultiple($this->bin, $hits, $requested - $hits, microtime(TRUE) - $start);
+    }
     $cids = array_values(array_diff($cids, array_keys($results)));
     return $results;
   }
@@ -148,6 +163,7 @@ class AerospikeCacheBackend implements CacheBackendInterface {
     $tags = array_unique($tags);
     sort($tags);
 
+    $start = ($this->stats && $this->stats->isEnabled()) ? microtime(TRUE) : 0.0;
     $wp = $this->writePolicyFor($expire);
 
     // Encode the payload. Large items are compressed; the result is base64'd
@@ -177,6 +193,9 @@ class AerospikeCacheBackend implements CacheBackendInterface {
         // Fits in one record. multipart = 0 marks it as a single item.
         $bins = array_merge([new Bin('data', $payload), new Bin('multipart', 0)], $meta);
         $client->put($wp, $this->connection->makeKey($this->bin, $cid), $bins);
+        if ($start) {
+          $this->stats->recordSet($this->bin, microtime(TRUE) - $start);
+        }
         return;
       }
 
@@ -199,6 +218,9 @@ class AerospikeCacheBackend implements CacheBackendInterface {
       // Parent holds metadata and the chunk count, but no data bin.
       $bins = array_merge([new Bin('multipart', count($chunks))], $meta);
       $client->put($wp, $this->connection->makeKey($this->bin, $cid), $bins);
+      if ($start) {
+        $this->stats->recordSet($this->bin, microtime(TRUE) - $start);
+      }
     }
     catch (\Throwable $e) {
       $this->logError('set', $e);

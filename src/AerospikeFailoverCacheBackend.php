@@ -40,12 +40,15 @@ class AerospikeFailoverCacheBackend implements CacheBackendInterface {
    * @param \Closure $loggerFactory
    *   A service closure returning the logger.factory. Injected lazily to avoid
    *   a circular dependency when a site logger depends on a cache backend.
+   * @param \Drupal\aerospike_cache\AerospikeCacheStats|null $stats
+   *   The request-scoped stats collector; flags failover for diagnostics.
    */
   public function __construct(
     protected CacheBackendInterface $aerospike,
     protected CacheBackendInterface $fallback,
     protected AerospikeConnection $connection,
     protected \Closure $loggerFactory,
+    protected ?AerospikeCacheStats $stats = NULL,
   ) {}
 
   /**
@@ -53,6 +56,7 @@ class AerospikeFailoverCacheBackend implements CacheBackendInterface {
    */
   protected function backend(): CacheBackendInterface {
     if (!$this->connection->isAvailable()) {
+      $this->stats?->markBypass();
       if (!$this->failoverWarned) {
         $this->failoverWarned = TRUE;
         // Resolve the factory at runtime via the service closure — never at

@@ -21,6 +21,7 @@ class AerospikeFailoverCacheBackendFactory implements CacheFactoryInterface {
     protected CacheFactoryInterface $databaseFactory,
     protected AerospikeConnection $connection,
     protected \Closure $loggerFactory,
+    protected ?AerospikeCacheStats $stats = NULL,
   ) {}
 
   /**
@@ -32,6 +33,7 @@ class AerospikeFailoverCacheBackendFactory implements CacheFactoryInterface {
       $this->databaseFactory->get($bin),
       $this->connection,
       $this->loggerFactory,
+      $this->stats,
     );
   }
 

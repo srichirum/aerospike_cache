@@ -93,6 +93,7 @@ are used as fallbacks where noted.
 | `aerospike_cache_prefix` | `''` (none) | `AEROSPIKE_PREFIX` |
 | `aerospike_cache_max_record_size` | `1000000` | — |
 | `aerospike_cache_compress_threshold` | `4096` | — |
+| `aerospike_cache_debug` | `FALSE` | — |
 
 ## Large items and record size limits
 
@@ -169,6 +170,51 @@ Enable the `aerospike_cache_admin` submodule for a diagnostics page at
 > Aerospike server-internal statistics (memory, evictions, hit ratio) are
 > reached over the info protocol, which the PHP client does not expose through
 > the ACM socket — so the report covers what is reachable from the application.
+
+## Per-request diagnostics (hit/miss visibility)
+
+To see, on a per-page basis, whether a response came out of Aerospike, enable
+debug mode. There are two ways, and the first overrides the second:
+
+1. **settings.php** — defining the flag hard-forces the state for the whole
+   environment (useful to keep production off no matter what):
+
+   ```php
+   $settings['aerospike_cache_debug'] = TRUE;  // or FALSE to lock it off
+   ```
+
+2. **Admin toggle** — with the `aerospike_cache_admin` submodule, a checkbox at
+   **Reports → Aerospike cache** turns diagnostics on or off. It is stored in
+   State and takes effect on the next request with no deployment or cache
+   rebuild. When settings.php defines the flag, this checkbox is shown disabled.
+
+This is a development aid and a no-op when off, so it carries no measurable
+overhead in production. When on, two things appear:
+
+**Response headers** — added to every response (HTML and headless JSON:API
+alike), visible in browser dev tools → Network:
+
+```
+X-Aerospike-Cache: HIT            # page-level result: HIT / MISS / BYPASS
+X-Aerospike-Cache-Ops: get=1 hit=1 miss=0 set=0
+X-Aerospike-Cache-Time: 1.96ms
+```
+
+The header is written by a stack middleware that wraps the page cache, so on an
+anonymous page-cache HIT it reports the live result (one Aerospike read) rather
+than a stale figure baked into the cached response.
+
+**Toolbar tab** — with the `aerospike_cache_admin` submodule and the core
+Toolbar module enabled, an "Aerospike" tab shows the same page-level result plus
+a live op count and latency, and its tray breaks the activity down per bin. The
+tab is placeholdered, so it stays accurate even when the rest of the page is
+served from the dynamic page cache.
+
+> The figures count Aerospike I/O only. The `bootstrap`, `config` and
+> `discovery` bins use an APCu fast tier (ChainedFastBackend); once APCu is warm
+> those reads never reach Aerospike and so are not counted — which is the
+> intended behaviour, not a gap. `BYPASS` means Aerospike was unreachable and
+> the request was served from the database fallback.
 
 ## Cache tag invalidation
 

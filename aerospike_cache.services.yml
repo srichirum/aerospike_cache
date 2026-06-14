@@ -6,6 +6,28 @@ services:
     class: Drupal\aerospike_cache\AerospikeConnection
     arguments: ['@settings']
 
+  # Request-scoped collector of Aerospike cache activity (reads, writes,
+  # failover). A no-op unless $settings['aerospike_cache_debug'] is TRUE, so it
+  # carries no measurable overhead in production.
+  aerospike_cache.stats:
+    class: Drupal\aerospike_cache\AerospikeCacheStats
+    arguments:
+      - '@settings'
+      # Lazy service closure: State (database-backed) is only resolved when
+      # settings.php does not force the flag, keeping it off the early-bootstrap
+      # cache path in the common case.
+      - !service_closure '@state'
+
+  # Adds X-Aerospike-Cache diagnostic headers when debug is on. A stack
+  # middleware (priority 210) wrapping http_middleware.page_cache (200), so it
+  # runs on every request — including anonymous page-cache hits — and writes
+  # fresh headers that are never stored in the cached page response.
+  http_middleware.aerospike_cache_stats:
+    class: Drupal\aerospike_cache\StackMiddleware\AerospikeCacheStatsMiddleware
+    arguments: ['@aerospike_cache.stats']
+    tags:
+      - { name: http_middleware, priority: 210 }
+
   # Alias so other services can inject the checksum provider by module name.
   # AerospikeCacheServiceProvider replaces the real definition at compile time.
   aerospike_cache.tags_checksum:
@@ -23,6 +45,7 @@ services:
       # from being traversed at compile time, which would otherwise form a
       # circular dependency via any site logger that depends on a cache backend.
       - !service_closure '@logger.factory'
+      - '@aerospike_cache.stats'
     tags:
       - { name: cache.bin_factory }
 
@@ -46,5 +69,6 @@ services:
       - '@aerospike_cache.connection'
       # Lazy service closure — see note on cache.backend.aerospike above.
       - !service_closure '@logger.factory'
+      - '@aerospike_cache.stats'
     tags:
       - { name: cache.bin_factory }

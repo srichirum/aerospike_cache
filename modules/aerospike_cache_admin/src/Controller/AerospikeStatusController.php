@@ -8,7 +8,9 @@ use Aerospike\PartitionFilter;
 use Aerospike\ReadPolicy;
 use Aerospike\ScanPolicy;
 use Aerospike\WritePolicy;
+use Drupal\aerospike_cache\AerospikeCacheStats;
 use Drupal\aerospike_cache\AerospikeConnection;
+use Drupal\aerospike_cache_admin\Form\AerospikeDebugForm;
 use Drupal\Core\Controller\ControllerBase;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 
@@ -51,14 +53,22 @@ class AerospikeStatusController extends ControllerBase {
    *
    * @param \Drupal\aerospike_cache\AerospikeConnection $connection
    *   The Aerospike connection.
+   * @param \Drupal\aerospike_cache\AerospikeCacheStats $stats
+   *   The stats collector, read for the current diagnostics state.
    */
-  public function __construct(protected AerospikeConnection $connection) {}
+  public function __construct(
+    protected AerospikeConnection $connection,
+    protected AerospikeCacheStats $stats,
+  ) {}
 
   /**
    * {@inheritdoc}
    */
   public static function create(ContainerInterface $container): static {
-    return new static($container->get('aerospike_cache.connection'));
+    return new static(
+      $container->get('aerospike_cache.connection'),
+      $container->get('aerospike_cache.stats'),
+    );
   }
 
   /**
@@ -85,9 +95,24 @@ class AerospikeStatusController extends ControllerBase {
       [$this->t('Compress threshold'), $this->t('@n bytes', ['@n' => $threshold])],
     ]);
 
+    $build['diagnostics'] = [
+      '#type' => 'details',
+      '#title' => $this->t('Per-request diagnostics'),
+      '#open' => TRUE,
+      '#cache' => ['max-age' => 0],
+      'status' => [
+        '#markup' => '<p>' . $this->t('Current state: <strong>@state</strong>. When on, every response carries X-Aerospike-Cache headers and (with the core Toolbar module) a live Aerospike toolbar tab showing per-page hit/miss.', [
+          '@state' => $this->stats->isEnabled() ? $this->t('ON') : $this->t('OFF'),
+        ]) . '</p>',
+      ],
+      'form' => $this->formBuilder()->getForm(AerospikeDebugForm::class),
+    ];
+
     if (!$available) {
       $build['unavailable'] = [
-        '#markup' => '<p>' . $this->t('Aerospike is unreachable; latency and record counts are unavailable.') . '</p>',
+        '#markup' => '<p>' . $this->t(
+          'Aerospike is unreachable; latency and record counts are unavailable.'
+        ) . '</p>',
       ];
       return $build;
     }

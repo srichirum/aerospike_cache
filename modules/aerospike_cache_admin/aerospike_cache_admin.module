@@ -1,0 +1,51 @@
+<?php
+
+/**
+ * @file
+ * Diagnostics UI for the Aerospike cache backend.
+ */
+
+/**
+ * Implements hook_toolbar().
+ *
+ * Adds a live "Aerospike" tab showing whether the current response came out of
+ * Aerospike and how much cache I/O it took. Only present when the
+ * `aerospike_cache_debug` setting is on and the user may administer the cache.
+ */
+function aerospike_cache_admin_toolbar() {
+  $stats = \Drupal::service('aerospike_cache.stats');
+  if (!$stats->isEnabled() || !\Drupal::currentUser()->hasPermission('administer aerospike cache')) {
+    return [];
+  }
+
+  // The lazy builders are nested one level below 'tab' and 'tray.content': the
+  // toolbar render element injects #attributes onto those elements, which would
+  // collide with #lazy_builder (it forbids sibling properties). Nesting keeps
+  // each #lazy_builder element clean while still placeholdering the live data.
+  $items['aerospike_cache_admin'] = [
+    '#type' => 'toolbar_item',
+    'tab' => [
+      '#type' => 'html_tag',
+      '#tag' => 'div',
+      '#attributes' => ['class' => ['toolbar-tab-aerospike']],
+      'live' => [
+        '#lazy_builder' => ['aerospike_cache_admin.toolbar:renderTab', []],
+        '#create_placeholder' => TRUE,
+      ],
+    ],
+    'tray' => [
+      '#heading' => t('Aerospike cache — this request'),
+      'content' => [
+        '#type' => 'container',
+        'live' => [
+          '#lazy_builder' => ['aerospike_cache_admin.toolbar:renderTray', []],
+          '#create_placeholder' => TRUE,
+        ],
+      ],
+    ],
+    '#weight' => 200,
+    '#cache' => ['max-age' => 0],
+    '#attached' => ['library' => ['aerospike_cache_admin/toolbar']],
+  ];
+  return $items;
+}

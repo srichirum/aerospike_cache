@@ -1,0 +1,38 @@
+/**
+ * Styling for the live Aerospike toolbar tab.
+ */
+
+.aerospike-toolbar {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+  padding: 0.4em 1em;
+}
+
+.aerospike-toolbar__result {
+  font-weight: bold;
+}
+
+.aerospike-toolbar__detail {
+  font-size: 0.85em;
+  opacity: 0.85;
+}
+
+/* Page-level result colour cues. */
+.aerospike-toolbar--hit .aerospike-toolbar__result {
+  color: #1a7f37; /* green: served from Aerospike */
+}
+
+.aerospike-toolbar--miss .aerospike-toolbar__result {
+  color: #9a6700; /* amber: built this request, then cached */
+}
+
+.aerospike-toolbar--bypass .aerospike-toolbar__result {
+  color: #cf222e; /* red: Aerospike unreachable, database fallback */
+}
+
+.aerospike-toolbar__note {
+  margin: 0.5em 1em;
+  font-size: 0.85em;
+  color: #555;
+}

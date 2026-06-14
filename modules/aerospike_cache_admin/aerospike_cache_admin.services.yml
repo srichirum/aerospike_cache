@@ -1,0 +1,6 @@
+services:
+
+  # Builds the live per-request Aerospike toolbar tab and tray.
+  aerospike_cache_admin.toolbar:
+    class: Drupal\aerospike_cache_admin\Toolbar\AerospikeToolbar
+    arguments: ['@aerospike_cache.stats']
